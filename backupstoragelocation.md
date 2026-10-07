@@ -1,5 +1,51 @@
 # Backup Storage Location
 
+## OCI Object Storage with OKE Workload Identity
+
+Use `velero.io/oci` for the native OCI backend. This path uses the OCI Go SDK and OKE Workload Identity; it does not use the S3-compatible API, AWS credentials, OCI API keys, or a `cloud-credentials` Secret.
+
+The Velero ServiceAccount must be dedicated to this workload and configured for OKE Workload Identity. The cluster must be an enhanced OKE cluster. The OCI IAM policy should bind the workload identity to the bucket and allow only object operations. Replace the placeholders below:
+
+```
+Allow any-user to manage objects in compartment <BUCKET_COMPARTMENT> where all {
+  target.bucket.name = '<BUCKET>',
+  request.principal.type = 'workload',
+  request.principal.namespace = 'velero',
+  request.principal.service_account = 'velero',
+  request.principal.cluster_id = '<OKE_CLUSTER_OCID>'
+}
+
+Allow any-user to manage buckets in compartment <BUCKET_COMPARTMENT> where all {
+  target.bucket.name = '<BUCKET>',
+  request.principal.type = 'workload',
+  request.principal.namespace = 'velero',
+  request.principal.service_account = 'velero',
+  request.principal.cluster_id = '<OKE_CLUSTER_OCID>'
+}
+```
+
+The `manage buckets` statement is required for the `PAR_MANAGE` permission used to create the object-read download URLs. It is restricted to the configured bucket and workload identity because OCI does not expose a narrower PAR-only policy verb.
+
+The OCI namespace is the Object Storage namespace, not the Kubernetes namespace. Both `region` and `ociNamespace` are required; the bucket remains under `spec.objectStorage.bucket`:
+
+```yaml
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: oci
+  namespace: velero
+spec:
+  provider: velero.io/oci
+  objectStorage:
+    bucket: my-oci-bucket
+    prefix: velero
+  config:
+    region: sa-saopaulo-1
+    ociNamespace: my-object-storage-namespace
+```
+
+Do not set `spec.credential`, create `cloud-credentials`, or use `--secret-file` for this BSL. The provider creates OCI Pre-Authenticated Requests for Velero downloads and applies the requested TTL. OCI volume snapshots are not part of this provider; use the AWS/EBS `velero.io/aws` snapshotter separately when needed.
+
 The following sample AWS `BackupStorageLocation` YAML shows all of the configurable parameters. The items under `spec.config` can be provided as key-value pairs to the `velero install` command's `--backup-location-config` flag -- for example, `region=us-east-1,serverSideEncryption=AES256,...`.
 
 ```yaml

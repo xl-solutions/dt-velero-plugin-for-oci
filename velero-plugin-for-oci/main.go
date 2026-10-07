@@ -26,6 +26,7 @@ func main() {
 	veleroplugin.NewServer().
 		BindFlags(pflag.CommandLine).
 		RegisterObjectStore("velero.io/aws", newAwsObjectStore).
+		RegisterObjectStore("velero.io/oci", newOCIObjectStore).
 		RegisterVolumeSnapshotter("velero.io/aws", newAwsVolumeSnapshotter).
 		Serve()
 }

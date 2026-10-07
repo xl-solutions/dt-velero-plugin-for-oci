@@ -24,14 +24,14 @@ ENV GOOS=${TARGETOS} \
     GOARM=${TARGETVARIANT} \
     GOPROXY=${GOPROXY}
 
-COPY . /go/src/velero-plugin-for-aws
-WORKDIR /go/src/velero-plugin-for-aws
+COPY . /go/src/dt-velero-plugin-for-oci
+WORKDIR /go/src/dt-velero-plugin-for-oci
 RUN export GOARM=$( echo "${GOARM}" | cut -c2-) && \
-    CGO_ENABLED=0 go build -v -o /go/bin/velero-plugin-for-aws ./velero-plugin-for-aws && \
+    CGO_ENABLED=0 go build -v -o /go/bin/dt-velero-plugin-for-oci ./velero-plugin-for-oci && \
     CGO_ENABLED=0 go build -v -o /go/bin/cp-plugin ./hack/cp-plugin
 FROM scratch
-LABEL org.opencontainers.image.source="https://github.com/velero-io/velero-plugin-for-aws"
-COPY --from=build /go/bin/velero-plugin-for-aws /plugins/
+LABEL org.opencontainers.image.source="https://github.com/xl-solutions/dt-velero-plugin-for-oci"
+COPY --from=build /go/bin/dt-velero-plugin-for-oci /plugins/
 COPY --from=build /go/bin/cp-plugin /bin/cp-plugin
 USER 65532:65532
-ENTRYPOINT ["cp-plugin", "/plugins/velero-plugin-for-aws", "/target/velero-plugin-for-aws"]
+ENTRYPOINT ["cp-plugin", "/plugins/dt-velero-plugin-for-oci", "/target/dt-velero-plugin-for-oci"]

@@ -1,5 +1,7 @@
 # Volume Snapshot Location
 
+OCI Object Storage support in this plugin is limited to backup object storage. There is no OCI `VolumeSnapshotter` or OCI `VolumeSnapshotLocation` in this delivery. Keep this resource configured with `provider: velero.io/aws` for AWS/EBS snapshots only; do not use `velero.io/oci` here.
+
 The following sample AWS `VolumeSnapshotLocation` YAML shows all of the configurable parameters. The items under `spec.config` can be provided as key-value pairs to the `velero install` command's `--snapshot-location-config` flag -- for example, `region=us-east-1,profile=secondary,...`.
 
 ```yaml
