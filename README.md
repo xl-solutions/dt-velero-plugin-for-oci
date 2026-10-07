@@ -1,19 +1,29 @@
-[![Build Status][101]][102]
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fvelero-io%2Fvelero-plugin-for-aws.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fvelero-io%2Fvelero-plugin-for-aws?ref=badge_shield)
-
-# Velero plugins for AWS
+# Velero plugin for OCI with AWS compatibility
 
 ## Overview
 
-This repository contains plugins for running Velero with AWS and OCI Object Storage:
+This repository contains a Velero plugin focused on native OCI Object Storage, with the existing AWS S3/EBS integrations preserved for compatibility:
 
-- An object store plugin for persisting and retrieving backups on AWS S3. Content of backup is kubernetes resources and metadata files for CSI objects, progress of async operations.  
+- An OCI Object Storage object store selected with `velero.io/oci`, authenticated through OKE Workload Identity and the official OCI Go SDK. It does not use the OCI S3-compatible API, AWS credentials, Access Keys, Secret Keys, or a `cloud-credentials` Secret.
+
+- An AWS S3 object store selected with `velero.io/aws`. Content of backup is kubernetes resources and metadata files for CSI objects, progress of async operations.
   It is also used to store the result data of backups and restores include log files, warning/error files, etc.
 
-- A volume snapshotter plugin for creating snapshots from volumes (during a backup) and volumes from snapshots (during a restore) on AWS EBS.
+- An AWS EBS volume snapshotter selected with `velero.io/aws` for creating snapshots from volumes during backup and volumes from snapshots during restore.
   - Since v1.4.0 the snapshotter plugin can handle the volumes provisioned by CSI driver `ebs.csi.aws.com`
 
-- A native OCI Object Storage object store using OKE Workload Identity. It does not use the OCI S3-compatible endpoint or static access keys. OCI volume snapshots are not included; the snapshotter remains AWS/EBS-only.
+OCI support is limited to Object Storage in this delivery. OCI volume snapshots are not implemented; `VolumeSnapshotLocation` remains AWS/EBS-only.
+
+## Provider selection
+
+Use the provider explicitly in each Velero resource:
+
+| Backend | Object store | Volume snapshots | Credentials |
+|---|---|---|---|
+| OCI | `velero.io/oci` | Not supported | OKE Workload Identity; no credential Secret |
+| AWS | `velero.io/aws` | AWS/EBS | Existing AWS credential or pod-identity mechanisms |
+
+Do not use `velero.io/aws` with an OCI S3-compatible endpoint. That path uses the AWS SDK and is the source of the OCI compatibility problems described in the known-issues section below.
 
 
 ## Compatibility
@@ -43,18 +53,17 @@ Below is a listing of plugin versions and respective Velero versions that are co
 |Backblaze B2|checksumAlgorithm="" to avoid `api error XAmzContentSHA256Mismatch`||||
 ## Filing issues
 
-If you would like to file a GitHub issue for the plugin, please open the issue on the [core Velero repo][103]
+If you would like to file an issue for this distribution, use the [project issue tracker][103]. For a problem in Velero itself, use the [core Velero repository](https://github.com/velero-io/velero/issues).
 
 
-## Setup
+## Setup overview
 
-To set up Velero on AWS, you:
+Choose one of the following paths:
 
-* [Create an S3 bucket][1]
-* [Set permissions for Velero][2]
-* [Install and start Velero][3]
+* [OCI Object Storage with OKE Workload Identity](#oci-object-storage-with-oke-workload-identity)
+* [AWS compatibility path](#aws-compatibility-path)
 
-You can also use this plugin to [migrate PVs across clusters][5] or create an additional [Backup Storage Location][12].
+The OCI and AWS paths can coexist in the same Velero installation as separate Backup Storage Locations. Keep the provider, credentials, and snapshot configuration explicit.
 
 If you do not have the `aws` CLI locally installed, follow the [user guide][6] to set it up.
 
@@ -62,7 +71,22 @@ If you do not have the `aws` CLI locally installed, follow the [user guide][6] t
 
 The OCI provider is selected explicitly with `velero.io/oci`. It uses the native OCI Go SDK and `OkeWorkloadIdentityConfigurationProvider`, so the Velero pod authenticates with its projected Kubernetes ServiceAccount token. Do not create a `cloud-credentials` Secret for this BSL and do not pass `--secret-file` for the OCI installation.
 
-This requires an OKE enhanced cluster with Workload Identity enabled, the OCI Go SDK version supported by this plugin, and an Object Storage bucket in the configured region. Create a dedicated ServiceAccount for Velero and configure the OCI workload identity mapping for the Velero namespace and ServiceAccount.
+This requires an OKE enhanced cluster with Workload Identity enabled, an Object Storage bucket in the configured region, and the OCI Go SDK dependency pinned by this repository (`github.com/oracle/oci-go-sdk/v65`). Create a dedicated ServiceAccount for Velero and configure the OCI workload identity mapping for the Velero namespace and ServiceAccount. The Velero deployment must use that ServiceAccount and have its projected service-account token available:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero
+  namespace: velero
+---
+# Relevant part of the Velero deployment
+spec:
+  template:
+    spec:
+      serviceAccountName: velero
+      automountServiceAccountToken: true
+```
 
 Create an IAM policy scoped to the workload identity and bucket. Replace the placeholders with the actual values:
 
@@ -111,6 +135,7 @@ Install the plugin image and use the dedicated ServiceAccount in the Velero depl
 velero install \
   --provider velero.io/oci \
   --plugins <OCI_PLUGIN_IMAGE> \
+  --service-account-name velero \
   --bucket <BUCKET> \
   --backup-location-config region=<OCI_REGION>,ociNamespace=<OBJECT_STORAGE_NAMESPACE> \
   --no-secret
@@ -118,7 +143,23 @@ velero install \
 
 Do not configure a `VolumeSnapshotLocation` with `velero.io/oci`: OCI Object Storage support in this release is object storage only. Validate the OCI BSL with a real backup, restore, object listing, object deletion, Velero log/backup download, and a Velero pod restart before migrating workloads. Keep the previous image and BSL available for rollback until that validation is approved.
 
-## Create S3 bucket
+## Build and publish the plugin image
+
+Build from the repository root, the directory containing `Dockerfile`, `go.mod`, and the `velero-plugin-for-aws` source directory. Replace the registry and tag with the values used by your environment:
+
+```bash
+IMAGE=<REGISTRY>/dt-velero-plugin-for-oci:<TAG>
+docker build -t "$IMAGE" .
+docker push "$IMAGE"
+```
+
+Use the same image in the OCI `velero install` command above. The image contains both providers, but the provider selected by each Backup Storage Location determines which SDK and authentication path are used.
+
+## AWS compatibility path
+
+The AWS path remains available and uses `velero.io/aws`, the AWS SDK, and the existing AWS configuration documented below. Use it for AWS S3 and AWS/EBS snapshots. Do not use this path for OCI.
+
+### Create S3 bucket
 
 Velero requires an object storage bucket to store backups in, preferably unique to a single Kubernetes cluster (see the [FAQ][11] for more details). Create an S3 bucket, replacing placeholders appropriately:
 
@@ -138,9 +179,9 @@ aws s3api create-bucket \
     --region us-east-1
 ```
 
-## Set permissions for Velero
+### Set permissions for Velero
 
-### Option 1: Set permissions with an IAM user
+#### Option 1: Set permissions with an IAM user
 
 For more information, see [the AWS documentation on IAM users][10].
 
@@ -237,7 +278,7 @@ For more information, see [the AWS documentation on IAM users][10].
     where the access key id and secret are the values returned from the `create-access-key` request.
 
 
-### Option 2: Set permissions using kube2iam
+#### Option 2: Set permissions using kube2iam
 
 [Kube2iam](https://github.com/jtblin/kube2iam) is a Kubernetes application that allows managing AWS IAM permissions for pod via annotations rather than operating on API keys.
 
@@ -332,7 +373,7 @@ It can be set up for Velero by creating a role that will have required permissio
       --policy-document file://./velero-policy.json
     ```
 
-## Install and start Velero
+### Install and start Velero
 
 [Download][4] Velero
 
@@ -343,7 +384,7 @@ Install Velero, including all prerequisites, into the cluster and start the depl
 ```bash
 velero install \
     --provider aws \
-    --plugins velero/velero-plugin-for-aws:v1.13.0 \
+    --plugins <PLUGIN_IMAGE> \
     --bucket $BUCKET \
     --backup-location-config region=$REGION \
     --snapshot-location-config region=$REGION \
@@ -355,7 +396,7 @@ velero install \
 ```bash
 velero install \
     --provider aws \
-    --plugins velero/velero-plugin-for-aws:v1.13.0 \
+    --plugins <PLUGIN_IMAGE> \
     --bucket $BUCKET \
     --backup-location-config region=$REGION \
     --snapshot-location-config region=$REGION \
@@ -501,7 +542,7 @@ It is not possible to use different credentials for additional Backup Storage Lo
 ### Prerequisites
 
 * Velero 1.6.0 or later
-* AWS plugin must be installed, either at install time, or by running `velero plugin add velero/velero-plugin-for-aws:plugin-version`, replace the `plugin-version` with the corresponding value
+* This plugin must be installed, either at install time, or by running `velero plugin add <PLUGIN_IMAGE>`.
 
 ### Configure S3 bucket and credentials
 
@@ -636,10 +677,8 @@ Additionally, the KMS key policy must allow the EC2 service to use the key:
 [15]: #create-s3-bucket
 [16]: #option-1-set-permissions-with-an-iam-user
 [17]: https://kubernetes.io/docs/concepts/configuration/secret/
-[101]: https://github.com/velero-io/velero-plugin-for-aws/workflows/Main%20CI/badge.svg
-[102]: https://github.com/velero-io/velero-plugin-for-aws/actions?query=workflow%3A"Main+CI"
-[103]: https://github.com/velero-io/velero/issues/new/choose
+[103]: https://github.com/xl-solutions/dt-velero-plugin-for-oci/issues/new/choose
 
 
 ## License
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fvelero-io%2Fvelero-plugin-for-aws.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fvelero-io%2Fvelero-plugin-for-aws?ref=badge_large)
+Apache License 2.0. See [LICENSE](LICENSE).
