@@ -5,13 +5,15 @@
 
 ## Overview
 
-This repository contains these plugins to support running Velero on AWS:
+This repository contains plugins for running Velero with AWS and OCI Object Storage:
 
 - An object store plugin for persisting and retrieving backups on AWS S3. Content of backup is kubernetes resources and metadata files for CSI objects, progress of async operations.  
   It is also used to store the result data of backups and restores include log files, warning/error files, etc.
 
 - A volume snapshotter plugin for creating snapshots from volumes (during a backup) and volumes from snapshots (during a restore) on AWS EBS.
   - Since v1.4.0 the snapshotter plugin can handle the volumes provisioned by CSI driver `ebs.csi.aws.com`
+
+- A native OCI Object Storage object store using OKE Workload Identity. It does not use the OCI S3-compatible endpoint or static access keys. OCI volume snapshots are not included; the snapshotter remains AWS/EBS-only.
 
 
 ## Compatibility
@@ -32,7 +34,7 @@ Below is a listing of plugin versions and respective Velero versions that are co
 |-|-|-|-|
 |Google Cloud Storage|[Should use GCP plugin instead](https://github.com/velero-io/velero-plugin-for-gcp)||https://issuetracker.google.com/issues/256641357|
 |Net App|`operation error S3: PutObject, https response error StatusCode: 501, RequestID: , HostID: , api error NotImplemented: The s3 command you requested is not implemented.`|https://github.com/velero-io/velero/issues/7828 https://github.com/velero-io/velero/issues/8152|[Fixed in ONTAP Release 9.15.1P2.](https://github.com/velero-io/velero/issues/8152#issuecomment-2464471703:~:text=issue%20is%20fixed%20using%20latest%20version%20NetApp%20Release%209.15.1P2.) <br> [Fixed in Net App StorageGRID® Version 11.8.0.7](https://github.com/velero-io/velero/issues/7828#issuecomment-2507228050)|
-|Oracle||https://github.com/velero-io/velero/issues/8013||
+|Oracle|Use the native `velero.io/oci` provider documented below instead of the AWS S3-compatible path.|https://github.com/velero-io/velero/issues/8013||
 |IBM COS|checksumAlgorithm="" should work if [retention is not enabled](https://github.com/velero-io/velero/issues/7543#issuecomment-2225803682)|https://github.com/velero-io/velero/issues/7543||
 |Hitachi Content Platform (HCP)||||
 |Cloudian||https://github.com/velero-io/velero/issues/8264||
@@ -55,6 +57,66 @@ To set up Velero on AWS, you:
 You can also use this plugin to [migrate PVs across clusters][5] or create an additional [Backup Storage Location][12].
 
 If you do not have the `aws` CLI locally installed, follow the [user guide][6] to set it up.
+
+## OCI Object Storage with OKE Workload Identity
+
+The OCI provider is selected explicitly with `velero.io/oci`. It uses the native OCI Go SDK and `OkeWorkloadIdentityConfigurationProvider`, so the Velero pod authenticates with its projected Kubernetes ServiceAccount token. Do not create a `cloud-credentials` Secret for this BSL and do not pass `--secret-file` for the OCI installation.
+
+This requires an OKE enhanced cluster with Workload Identity enabled, the OCI Go SDK version supported by this plugin, and an Object Storage bucket in the configured region. Create a dedicated ServiceAccount for Velero and configure the OCI workload identity mapping for the Velero namespace and ServiceAccount.
+
+Create an IAM policy scoped to the workload identity and bucket. Replace the placeholders with the actual values:
+
+```
+Allow any-user to manage objects in compartment <BUCKET_COMPARTMENT> where all {
+  target.bucket.name = '<BUCKET>',
+  request.principal.type = 'workload',
+  request.principal.namespace = 'velero',
+  request.principal.service_account = 'velero',
+  request.principal.cluster_id = '<OKE_CLUSTER_OCID>'
+}
+
+Allow any-user to manage buckets in compartment <BUCKET_COMPARTMENT> where all {
+  target.bucket.name = '<BUCKET>',
+  request.principal.type = 'workload',
+  request.principal.namespace = 'velero',
+  request.principal.service_account = 'velero',
+  request.principal.cluster_id = '<OKE_CLUSTER_OCID>'
+}
+```
+
+The first statement covers reads, writes, deletes, listing, and multipart operations. The second is required because OCI uses the `PAR_MANAGE` permission to create the object-read Pre-Authenticated Requests used by Velero downloads. It is constrained to the configured bucket and workload identity; OCI's policy verbs do not expose a narrower PAR-only verb. If the bucket is in another compartment, create the policy in the tenancy or compartment that contains the bucket according to your OCI IAM layout.
+
+Create the BSL without credentials:
+
+```yaml
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: oci
+  namespace: velero
+spec:
+  provider: velero.io/oci
+  objectStorage:
+    bucket: <BUCKET>
+  config:
+    region: <OCI_REGION>
+    ociNamespace: <OBJECT_STORAGE_NAMESPACE>
+```
+
+The OCI provider requires both `region` and `ociNamespace`. The bucket is supplied by Velero. Signed download URLs are OCI Pre-Authenticated Requests and use the TTL supplied by Velero. Keep the AWS BSL and AWS snapshot location separate; adding the OCI provider does not change `velero.io/aws` behavior.
+
+Install the plugin image and use the dedicated ServiceAccount in the Velero deployment. For a new installation, the relevant shape is:
+
+```bash
+velero install \
+  --provider velero.io/oci \
+  --plugins <OCI_PLUGIN_IMAGE> \
+  --bucket <BUCKET> \
+  --backup-location-config region=<OCI_REGION>,ociNamespace=<OBJECT_STORAGE_NAMESPACE> \
+  --no-secret
+```
+
+Do not configure a `VolumeSnapshotLocation` with `velero.io/oci`: OCI Object Storage support in this release is object storage only. Validate the OCI BSL with a real backup, restore, object listing, object deletion, Velero log/backup download, and a Velero pod restart before migrating workloads. Keep the previous image and BSL available for rollback until that validation is approved.
 
 ## Create S3 bucket
 
