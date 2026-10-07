@@ -27,7 +27,7 @@ ENV GOOS=${TARGETOS} \
 COPY . /go/src/dt-velero-plugin-for-oci
 WORKDIR /go/src/dt-velero-plugin-for-oci
 RUN export GOARM=$( echo "${GOARM}" | cut -c2-) && \
-    CGO_ENABLED=0 go build -v -o /go/bin/dt-velero-plugin-for-oci ./velero-plugin-for-oci && \
+    CGO_ENABLED=0 go build -v -o /go/bin/dt-velero-plugin-for-oci ./dt-velero-plugin-for-oci && \
     CGO_ENABLED=0 go build -v -o /go/bin/cp-plugin ./hack/cp-plugin
 FROM scratch
 LABEL org.opencontainers.image.source="https://github.com/xl-solutions/dt-velero-plugin-for-oci"

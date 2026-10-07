@@ -145,7 +145,7 @@ Do not configure a `VolumeSnapshotLocation` with `velero.io/oci`: OCI Object Sto
 
 ## Build and publish the plugin image
 
-Build from the repository root, the directory containing `Dockerfile`, `go.mod`, and the `velero-plugin-for-oci` source directory. Replace the registry and tag with the values used by your environment:
+Build from the repository root, the directory containing `Dockerfile`, `go.mod`, and the `dt-velero-plugin-for-oci` source directory. Replace the registry and tag with the values used by your environment:
 
 ```bash
 IMAGE=<REGISTRY>/dt-velero-plugin-for-oci:<TAG>

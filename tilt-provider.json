@@ -3,7 +3,7 @@
   "context": ".",
   "image": "xl-solutions/dt-velero-plugin-for-oci",
   "live_reload_deps": [
-    "velero-plugin-for-oci"
+    "dt-velero-plugin-for-oci"
   ],
-  "go_main": "./velero-plugin-for-oci"
+  "go_main": "./dt-velero-plugin-for-oci"
 }
