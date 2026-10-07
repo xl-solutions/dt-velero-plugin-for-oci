@@ -13,10 +13,10 @@
 # limitations under the License.
 
 # The binary to build (just the basename).
-BIN ?= velero-plugin-for-aws
+BIN ?= dt-velero-plugin-for-oci
 
 # This repo's root import path (under GOPATH).
-PKG := github.com/velero-io/velero-plugin-for-aws
+PKG := github.com/xl-solutions/dt-velero-plugin-for-oci
 
 # Where to push the docker image.
 REGISTRY ?= velero

@@ -1,4 +1,4 @@
-module github.com/velero-io/velero-plugin-for-aws
+module github.com/xl-solutions/dt-velero-plugin-for-oci
 
 go 1.25.0
 
